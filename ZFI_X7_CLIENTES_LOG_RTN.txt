@@ -1,0 +1,417 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZFI_AR_X7_CLIENTES_LOG_RTN
+*&---------------------------------------------------------------------*
+
+class lcl_share_functions definition final.
+
+  public section.
+* tipos publicos
+    types:
+      typu_r_kunnr type range of kunnr,
+      typu_r_bukrs type range of bukrs,
+      typu_r_ztipo type range of zztipo,
+      typu_r_nbarc type range of znbar,
+      typu_r_erdat type range of zerdat,
+      typu_r_ertim type range of zertim,
+      typu_r_estat type range of zfi_x7_stat_cte.
+
+    methods:
+      constructor
+        importing
+          i_kunnr type  typu_r_kunnr
+          i_bukrs type  typu_r_bukrs
+          i_ztipo type  typu_r_ztipo
+          i_nbarc type  typu_r_nbarc
+          i_erdat type  typu_r_erdat
+          i_ertim type  typu_r_ertim
+          i_estat type  typu_r_estat.
+
+    methods
+      process.
+  private section.
+
+* tipos
+    types: begin of ty_log_alv,
+             icon  type icon-id,
+             kunnr type kunnr,
+             zzone type i,
+             bukrs type bukrs,
+             ztipo type zztipo,
+             nbarc type znbar,
+             erdat type zerdat,
+             ertim type zertim,
+             estat type zfi_x7_stat_cte,
+             messg type zmessg.
+    types: end of ty_log_alv.
+
+    types: tt_log_alv    type standard table of ty_log_alv,
+           tt_lvc_s_fcat type standard table of lvc_s_fcat.
+
+    data gt_log_alv type tt_log_alv.
+
+    methods:
+      common_routines_ooalv
+        importing
+          ityc_nb_container type char50
+        changing
+          ccl_gui_c_cont    type ref to cl_gui_custom_container
+          ccl_gui_alv_gr    type ref to cl_gui_alv_grid
+          ctt_functions     type ui_functions,
+      common_ooalv_display
+        importing
+          itt_exc_functions type ui_functions
+          itc_zebra         type lvc_zebra
+          icl_gui_alv_gr    type ref to cl_gui_alv_grid
+        changing
+          ctt_log_alv       type tt_log_alv
+          ctt_lvc_s_fcat    type tt_lvc_s_fcat,
+      prepare_catalog_ooalv
+        changing
+          ctt_lvc_s_fcat type tt_lvc_s_fcat.
+
+* variables privadas
+    data:
+      gv_kunnr type  typu_r_kunnr,
+      gv_bukrs type  typu_r_bukrs,
+      gv_ztipo type  typu_r_ztipo,
+      gv_nbarc type  typu_r_nbarc,
+      gv_erdat type  typu_r_erdat,
+      gv_ertim type  typu_r_ertim,
+      gv_estat type  typu_r_estat.
+
+
+* constantes
+    constants: c_cl_nbcontainer         type char50 value 'C_CONTAINER',
+               c_cl_type_e(1)           value 'E', "semaforo rojo
+               c_cl_type_p(1)           value 'P', "semaforo verde
+               c_cl_traffic_green_light type icon_d value '@08@',
+               c_cl_traffic_red_light   type icon_d value '@0A@'.
+
+endclass.
+
+class lcl_share_functions implementation.
+
+  method constructor.
+    gv_kunnr  = i_kunnr.
+    gv_bukrs  = i_bukrs.
+    gv_ztipo  = i_ztipo.
+    gv_nbarc  = i_nbarc.
+    gv_erdat  = i_erdat.
+    gv_ertim  = i_ertim.
+    gv_estat  = i_estat.
+  endmethod.
+
+  method process.
+
+    data: lt_log_alv    type table of ty_log_alv,
+          ls_log_alv    type ty_log_alv,
+          lt_lvc_s_fcat type tt_lvc_s_fcat.
+
+
+    select * from ztar_logclientes into table @data(lt_customers)
+      where
+        kunnr in  @gv_kunnr  and
+        bukrs in  @gv_bukrs  and
+        ztipo in  @gv_ztipo  and
+        nbarc in  @gv_nbarc  and
+        erdat in  @gv_erdat  and
+        ertim in  @gv_ertim  and
+        estat in  @gv_estat order by estat.
+
+
+    if lt_customers is initial.
+      write text-e11.
+      exit.
+    endif.
+
+    loop at lt_customers assigning field-symbol(<f>).
+      move-corresponding <f> to ls_log_alv.
+      if <f>-estat eq c_cl_type_e.
+        ls_log_alv-icon = c_cl_traffic_red_light.
+      elseif <f>-estat eq c_cl_type_p.
+        ls_log_alv-icon = c_cl_traffic_green_light.
+      endif.
+      ls_log_alv-zzone = 1.
+      append ls_log_alv to lt_log_alv.
+    endloop.
+
+* carga de tabla global
+    gt_log_alv = lt_log_alv.
+
+* alv oo
+    data: lcl_c_container type  ref to cl_gui_custom_container,
+          lcl_gui_alv_gr  type  ref to cl_gui_alv_grid,
+          lt_exc_funtions type ui_functions.
+    if lcl_c_container is initial.
+* instanciar clases (ALV)
+      me->common_routines_ooalv(
+        exporting
+          ityc_nb_container = c_cl_nbcontainer
+        changing
+          ccl_gui_c_cont = lcl_c_container
+          ccl_gui_alv_gr = lcl_gui_alv_gr
+          ctt_functions  = lt_exc_funtions
+       ).
+* catálogo
+      me->prepare_catalog_ooalv(
+        changing
+          ctt_lvc_s_fcat = lt_lvc_s_fcat
+      ).
+
+    endif.
+
+* mostrar alv
+    me->common_ooalv_display(
+      exporting
+        itt_exc_functions = lt_exc_funtions
+        itc_zebra         = abap_true
+        icl_gui_alv_gr    = lcl_gui_alv_gr
+      changing
+        ctt_log_alv       = lt_log_alv
+        ctt_lvc_s_fcat    = lt_lvc_s_fcat
+    ).
+
+    call screen '0100'.
+
+  endmethod.
+
+  method common_routines_ooalv.
+* create object
+    if ccl_gui_c_cont is initial.
+*
+      create object ccl_gui_c_cont
+        exporting
+          container_name              = ityc_nb_container
+        exceptions
+          cntl_error                  = 1
+          cntl_system_error           = 2
+          create_error                = 3
+          lifetime_error              = 4
+          lifetime_dynpro_dynpro_link = 5
+          others                      = 6.
+      if sy-subrc <> 0.
+        return.
+      endif.
+
+      create object ccl_gui_alv_gr
+        exporting
+          i_parent          = ccl_gui_c_cont->default_screen
+*         I_PARENT          = CCL_GUI_C_CONT
+        exceptions
+          error_cntl_create = 1
+          error_cntl_init   = 2
+          error_cntl_link   = 3
+          error_dp_create   = 4
+          others            = 5.
+      if sy-subrc <> 0.
+        return.
+      endif.
+
+    endif.
+
+* excluir funciones
+    data: ls_exclude type ui_func.
+
+*    LS_EXCLUDE = CL_GUI_ALV_GRID=>MC_FC_LOAD_VARIANT.
+*    APPEND LS_EXCLUDE TO CTT_FUNCTIONS.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_loc_delete_row.
+    append ls_exclude to ctt_functions.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_loc_append_row.
+    append ls_exclude to ctt_functions.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_loc_insert_row.
+    append ls_exclude to ctt_functions.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_loc_copy_row.
+    append ls_exclude to ctt_functions.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_loc_move_row.
+    append ls_exclude to ctt_functions.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_loc_cut.
+    append ls_exclude to ctt_functions.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_loc_paste_new_row.
+    append ls_exclude to ctt_functions.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_loc_undo.
+    append ls_exclude to ctt_functions.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_pc_file.
+    append ls_exclude to ctt_functions.
+*    LS_EXCLUDE = CL_GUI_ALV_GRID=>MC_FC_VIEW_GRID.
+*    APPEND LS_EXCLUDE TO CTT_FUNCTIONS.
+*    LS_EXCLUDE = CL_GUI_ALV_GRID=>MC_FC_GRAPH.
+*    APPEND LS_EXCLUDE TO CTT_FUNCTIONS.
+*    LS_EXCLUDE = CL_GUI_ALV_GRID=>MC_FC_VIEW_EXCEL.
+*    APPEND LS_EXCLUDE TO CTT_FUNCTIONS.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_view_grid.
+    append ls_exclude to ctt_functions.
+*    LS_EXCLUDE = CL_GUI_ALV_GRID=>MC_MB_VIEW.
+*    APPEND LS_EXCLUDE TO CTT_FUNCTIONS.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_help.
+    append ls_exclude to ctt_functions.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_check.
+    append ls_exclude to ctt_functions.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_info.
+    append ls_exclude to ctt_functions.
+    ls_exclude = cl_gui_alv_grid=>mc_fc_help.
+    append ls_exclude to ctt_functions.
+*    LS_EXCLUDE = CL_GUI_ALV_GRID=>MC_FC_MAINTAIN_VARIANT.
+*    APPEND LS_EXCLUDE TO CTT_FUNCTIONS.
+
+  endmethod.
+
+  method prepare_catalog_ooalv.
+
+    data: ls_fcat type lvc_s_fcat,
+          lv_cpos type i.
+*
+    clear ls_fcat.
+    add 1 to lv_cpos.
+    ls_fcat-fieldname = 'ICON'.
+    ls_fcat-col_pos = lv_cpos.
+    ls_fcat-coltext = text-m01.
+    ls_fcat-outputlen = '5'.
+    ls_fcat-just = 'C'.
+    insert ls_fcat into table ctt_lvc_s_fcat.
+*
+    clear ls_fcat.
+    add 1 to lv_cpos.
+    ls_fcat-fieldname = 'KUNNR'.
+    ls_fcat-col_pos = lv_cpos.
+    ls_fcat-coltext = text-m03.
+    ls_fcat-outputlen = '10'.
+    ls_fcat-just = 'C'.
+    ls_fcat-key = 'X'.
+    insert ls_fcat into table ctt_lvc_s_fcat.
+*
+    clear ls_fcat.
+    add 1 to lv_cpos.
+    ls_fcat-fieldname = 'ZZONE'.
+    ls_fcat-col_pos = lv_cpos.
+    ls_fcat-coltext = text-m11.
+    ls_fcat-outputlen = '5'.
+    ls_fcat-just = 'C'.
+    ls_fcat-key = 'X'.
+    insert ls_fcat into table ctt_lvc_s_fcat.
+*
+    clear ls_fcat.
+    add 1 to lv_cpos.
+    ls_fcat-fieldname = 'BUKRS'.
+    ls_fcat-col_pos = lv_cpos.
+    ls_fcat-coltext = text-m02.
+    ls_fcat-outputlen = '6'.
+    ls_fcat-just = 'C'.
+    ls_fcat-key = 'X'.
+    insert ls_fcat into table ctt_lvc_s_fcat.
+*
+    clear ls_fcat.
+    add 1 to lv_cpos.
+    ls_fcat-fieldname = 'ERDAT'.
+    ls_fcat-col_pos = lv_cpos.
+    ls_fcat-coltext = text-m07.
+    ls_fcat-outputlen = '10'.
+    ls_fcat-just = 'C'.
+    ls_fcat-key = 'X'.
+    ls_fcat-coltext = 'Fecha'.
+    insert ls_fcat into table ctt_lvc_s_fcat.
+*
+    clear ls_fcat.
+    add 1 to lv_cpos.
+    ls_fcat-fieldname = 'ERTIM'.
+    ls_fcat-col_pos = lv_cpos.
+    ls_fcat-coltext = text-m08.
+    ls_fcat-outputlen = '10'.
+    ls_fcat-just = 'C'.
+    ls_fcat-key = 'X'.
+    ls_fcat-coltext = 'Hora'.
+    insert ls_fcat into table ctt_lvc_s_fcat.
+*
+    clear ls_fcat.
+    add 1 to lv_cpos.
+    ls_fcat-fieldname = 'ZTIPO'.
+    ls_fcat-col_pos = lv_cpos.
+    ls_fcat-coltext = text-m05.
+    ls_fcat-outputlen = '10'.
+    ls_fcat-just = 'C'.
+    ls_fcat-ref_table = 'ZTAR_LOGCLIENTES'.
+    ls_fcat-ref_field = 'ZTIPO'.
+    insert ls_fcat into table ctt_lvc_s_fcat.
+*
+    clear ls_fcat.
+    add 1 to lv_cpos.
+    ls_fcat-fieldname = 'NBARC'.
+    ls_fcat-col_pos = lv_cpos.
+    ls_fcat-coltext = text-m06.
+    ls_fcat-outputlen = '40'.
+    ls_fcat-ref_table = 'ZTAR_LOGCLIENTES'.
+    ls_fcat-ref_field = 'NBARC'.
+    insert ls_fcat into table ctt_lvc_s_fcat.
+*
+*
+    clear ls_fcat.
+    add 1 to lv_cpos.
+    ls_fcat-fieldname = 'ESTAT'.
+    ls_fcat-col_pos = lv_cpos.
+    ls_fcat-coltext = text-m09.
+    ls_fcat-outputlen = '15'.
+    ls_fcat-just = 'C'.
+    ls_fcat-ref_table = 'ZTAR_LOGCLIENTES'.
+    ls_fcat-ref_field = 'ESTAT'.
+    insert ls_fcat into table ctt_lvc_s_fcat.
+*
+    clear ls_fcat.
+    add 1 to lv_cpos.
+    ls_fcat-fieldname = 'MESSG'.
+    ls_fcat-col_pos = lv_cpos.
+    ls_fcat-coltext = text-m10.
+    ls_fcat-outputlen = '40'.
+    ls_fcat-ref_table = 'ZTAR_LOGCLIENTES'.
+    ls_fcat-ref_field = 'MESSG'.
+    insert ls_fcat into table ctt_lvc_s_fcat.
+*
+*
+  endmethod.
+
+  method common_ooalv_display.
+
+    data ls_layout type lvc_s_layo.
+    ls_layout-zebra = itc_zebra.
+
+* variant
+    data: variant type  disvariant.
+
+    variant-report = sy-repid.
+    variant-username = sy-uname.
+
+    call method icl_gui_alv_gr->set_table_for_first_display
+      exporting
+        is_layout            = ls_layout
+        is_variant           = variant
+        i_save               = 'A'
+*       i_default            = space
+        it_toolbar_excluding = itt_exc_functions
+*       it_toolbar_excluding = gt_exclude
+      changing
+        it_outtab            = ctt_log_alv
+        it_fieldcatalog      = ctt_lvc_s_fcat.
+
+  endmethod.
+
+endclass.
+
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0100  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+module user_command_0100 input.
+  gv_ok_code = sy-ucomm.
+  case gv_ok_code.
+    when 'EXIT' or 'BACK' or 'CANC'.
+      leave to screen 0.
+  endcase.
+endmodule.
+*&---------------------------------------------------------------------*
+*&      Module  STATUS_0100  OUTPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+module status_0100 output.
+  set pf-status 'STATUS_0100'.
+  set titlebar 'TITULOS_0100'.
+endmodule.
