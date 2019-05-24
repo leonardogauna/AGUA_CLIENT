@@ -1,0 +1,922 @@
+*&---------------------------------------------------------------------*
+*&  Include           ZFI_AR_X7_CLIENTES_RTN
+*&---------------------------------------------------------------------*
+
+class lcl_share_functions definition final.
+  public section.
+    methods:
+      constructor
+        importing
+          i_fbas type zfi_x7_dirname_01
+          i_fpro type zfi_x7_dirname_01
+          i_ferr type zfi_x7_dirname_01.
+
+    methods process.
+
+
+  private section.
+
+* variables privadas (filtros)
+    data:
+      gv_cls_fpro type zfi_x7_dirname_01,
+      gv_cls_ferr type zfi_x7_dirname_01,
+      gv_cls_fbas type zfi_x7_dirname_01.
+*    DATA: gv_cls_fbas TYPE localfile,
+*          gvp_fech TYPE sy-datum.
+
+* variables globales
+    data: gv_file_name type localfile.
+* constantes
+    data:
+      c_exten_txt(3) value 'TXT',
+      c_exten_fin(3) value 'FIN',
+      c_cls_slash    value '/',
+      c_cls_type_p   value 'P', "Procesado
+      c_cls_type_e   value 'E', "En Error
+      c_cls_oper_n   value 'N', "Tipo de operación "Nuevo"
+      c_cls_oper_m   value 'M', "Tipo de operación "Modificación"
+      c_cls_acci_a   value 'A'. "Actualizar tabla
+
+
+*    DATA: VP_RUTA    TYPE OLR3_DMS_TV_FOLDER_NAME.
+* estructura cliente
+    types:
+      begin of ty_customers,
+        ztipo type  char1,
+        kunnr type  kunnr,
+        bukrs type  bukrs,
+        ktokd type  ktokd,
+        land1 type  land1_gp,
+        anred type  anred,
+        name1 type  name1_gp,
+        name2 type  name2_gp,
+        ort01 type  ort01_gp,
+        pstlz type  pstlz,
+        regio type  regio,
+        stras type  stras_gp,
+        telf1 type  telf1,
+        stcd1 type  stcd1,
+        stkzn type  stkzn,
+        akont type  akont,
+        zterm type  dzterm,
+        erdat type  erdat_rf,
+        ertim type  uzeit,    " VALIDAR ORIGEN DE ESTE CAMPO
+        sperr type  sperb_b,
+        loevm type  loevm_b,
+*  datos complementarios
+      end of ty_customers.
+
+* objetos (lectura de archivos)
+    types: begin of ty_file,
+*             DIR(100),
+             name        type znbar,
+             typ(10),
+             owner(8),
+             mode(3),
+             len(6)      type n,
+             mod_date    type d,
+             mod_time(8),
+             mtime(6)    type n,
+           end of ty_file.
+
+    types begin of ty_file_info_2.
+            include type ty_file.
+    types end of ty_file_info_2.
+
+    types: begin of ty_customer_process.
+            include type ztar_logclientes.
+*    TYPES: no_log(1).
+    types: end of ty_customer_process.
+
+    types: begin of ty_dataset,
+             row type string,
+           end of ty_dataset.
+
+    types:
+      tt_files2            type standard table of ty_file_info_2,
+      tt_dir_list          type standard table of eps2fili,
+      tt_dataset_file      type standard table of ty_dataset,
+      tt_customers         type standard table of ty_customers,
+      tt_customers_process type standard table of ty_customer_process.
+
+    methods:
+      get_files
+        exporting
+                  tt_dir_list    type tt_dir_list
+        returning value(success) type boolean,
+*        CHANGING
+*          tc_error    TYPE c OPTIONAL,
+      return_to_screen
+        exceptions error,
+      process_file
+        importing
+          tt_dataset type tt_dataset_file
+          tc_nb_file type znbar,
+      move_file
+        importing
+                  tt_dataset             type tt_dataset_file
+                  tc_nb_file             type znbar
+        returning value(returning_error) type char1,
+      dele_file
+        importing
+          tc_nb_file type znbar,
+      open_file
+        importing
+          tc_nb_file       type znbar
+          tc_flag_reproc   type c optional
+        changing
+          ctt_dataset_file type tt_dataset_file,
+      save_customer_processed
+        importing
+          ts_customer          type ty_customer_process
+        changing
+          tt_customers_process type tt_customers_process,
+*      PRINT_LOG
+*        IMPORTING
+*          TS_CUSTOMER TYPE TY_CUSTOMER_PROCESS,
+      cust_maintain_bapi
+        importing
+          ts_customer          type ty_customers
+          tc_nb_file           type znbar
+        changing
+          tt_customers_process type tt_customers_process,
+      validate_date_internal
+        importing
+                  tc_date_inp            type sy-datum
+        exporting
+                  td_date_out            type sy-datum
+        returning value(returning_error) type char1,
+      validate_date_external
+        importing
+                  tc_date_inp            type sy-datum
+        exporting
+                  td_date_out            type char10
+        returning value(returning_error) type char1,
+      log_spool
+        importing
+          tt_customers_process type tt_customers_process
+          tc_nb_file           type znbar optional,
+      log_file
+        importing
+                  tt_customers_process   type tt_customers_process
+                  tc_nb_file             type znbar
+        returning value(returning_error) type char1.
+
+endclass.
+
+class lcl_share_functions implementation.
+
+  method constructor.
+    gv_cls_fbas  = i_fbas.
+    gv_cls_fpro  = i_fpro.
+    gv_cls_ferr  = i_ferr.
+  endmethod.
+
+  method process.
+
+    data: lt_dir_list type standard table of eps2fili.
+    data: lt_dataset type standard table of ty_dataset,
+          lv_error   type c.
+
+* determina los archivos a ser procesados
+    if get_files( importing tt_dir_list = lt_dir_list ) = abap_true.
+
+*--------------------------------------------------------------------* lgauna | test
+*    TYPES: range TYPE RANGE OF eps2filnam.
+*    DATA: r_range TYPE range.
+*    r_range = VALUE #( sign = 'I'  option = 'EQ'
+*                                           ( low = 'P091218_793.txt' )
+*                                           ( low = 'P261118_77 -2.txt' ) ).
+
+*    DELETE lt_dir_list WHERE NOT name IN r_range.
+*      DELETE lt_dir_list WHERE name <> 'C171218_107_2.txt'.
+*      BREAK-POINT.
+*      EXIT.
+*--------------------------------------------------------------------*
+
+      loop at lt_dir_list assigning field-symbol(<f>).
+** abrir archivo
+        open_file(
+          exporting
+            tc_nb_file = <f>-name(100)
+          changing
+            ctt_dataset_file = lt_dataset ).
+*
+** procesar archivo
+        process_file(
+          exporting
+            tt_dataset = lt_dataset
+            tc_nb_file = <f>-name(100)
+            ).
+      endloop.
+    endif.
+
+  endmethod.
+
+
+  method get_files.
+
+    data: s_file              type ty_file,
+          s_files             type ty_file_info_2,
+          lc_extension_txt(3),
+          lc_extension_fin(3),
+*          LV_FOLDER       TYPE ZVAL01_GE,
+          sy_tabix            type sy-tabix,
+          lv_external_fech    type char10.
+
+
+    data: lv_dir_name   type eps2filnam,
+          ls_dir_list   type eps2fili,
+          lt_dir_list   type standard table of eps2fili,
+          l_v_file_mask type epsfilnam value 'C*'.
+    types begin of ty_dir.
+            include type eps2fili.
+    types: col_ord type i.
+*    TYPES: col_ord TYPE eps2filnam.
+    types end of ty_dir.
+    data: l_t_dir_f type standard table of ty_dir,
+          l_s_dir_f type ty_dir.
+
+    lv_dir_name =   gv_cls_fbas.
+*    lv_dir_name = gv_cls_fbas.
+
+    call function 'EPS2_GET_DIRECTORY_LISTING'
+      exporting
+        iv_dir_name            = lv_dir_name
+        file_mask              = l_v_file_mask
+      tables
+        dir_list               = lt_dir_list
+      exceptions
+        invalid_eps_subdir     = 1
+        sapgparam_failed       = 2
+        build_directory_failed = 3
+        no_authorization       = 4
+        read_directory_failed  = 5
+        too_many_read_errors   = 6
+        empty_directory_list   = 7
+        others                 = 8.
+    if sy-subrc <> 0.
+      write: 'Ha ocurrido un error al llamar a la función EPS2_GET_DIRECTORY_LISTING en el programa. (get_files)'.
+      exit.
+    endif.
+
+* reordenar archivos
+    data: l_v_name_split        type string,
+          l_v_complete_filename type pc_path,
+          l_v_extension         type string.
+    data : lv_string type string .
+    types: begin of ty_string,
+             str(12) type c,
+           end of ty_string.
+    data: l_t_string type table of ty_string,
+          l_s_string type ty_string.
+    loop at lt_dir_list assigning field-symbol(<l_f_dir_list>).
+      move-corresponding <l_f_dir_list> to l_s_dir_f.
+      l_v_complete_filename = <l_f_dir_list>-name+1.
+      call function 'PC_SPLIT_COMPLETE_FILENAME'
+        exporting
+          complete_filename = l_v_complete_filename
+        importing
+*         DRIVE             =
+          extension         = l_v_extension
+          name              = l_v_name_split
+*         NAME_WITH_EXT     =
+*         PATH              =
+        exceptions
+          invalid_drive     = 1
+          invalid_extension = 2
+          invalid_name      = 3
+          invalid_path      = 4
+          others            = 5.
+      try .
+          translate l_v_extension to upper case.
+          check l_v_extension eq c_exten_txt.
+          split l_v_name_split at '_' into table l_t_string.
+          data(l_v_seq) = l_t_string[ 2 ]-str.
+          if strlen( l_v_seq ) = 1.
+            l_v_seq = '0' &&  l_v_seq.
+          endif.
+          l_v_name_split = l_t_string[ 1 ]-str && l_v_seq.
+        catch cx_field_not_found into data(not_found).
+*          l_v_name_split = l_t_string[ 1 ]-str && '00'.
+      endtry.
+*      l_s_dir_f-col_ord = l_v_name_split.
+      append l_s_dir_f to l_t_dir_f.
+      clear l_s_dir_f.
+    endloop.
+    sort l_t_dir_f by col_ord ascending.
+    clear lt_dir_list.
+    move-corresponding l_t_dir_f to tt_dir_list.
+*    cl_demo_output=>display( tt_dir_list ).
+*    EXIT.
+    if tt_dir_list is initial.
+      write text-e11.
+      exit.
+    else.
+      success = abap_true.
+    endif.
+
+  endmethod.
+
+  method process_file.
+
+    data: lt_customers_process type tt_customers_process,
+          lt_customers         type standard table of ty_customers,
+          ls_customers         type ty_customers.
+
+    clear gv_file_name.
+    loop at tt_dataset assigning field-symbol(<wa_tab>).
+      clear ls_customers.
+      split <wa_tab>-row at '|' into
+        ls_customers-ztipo
+        ls_customers-kunnr
+        ls_customers-bukrs
+        ls_customers-ktokd
+        ls_customers-land1
+        ls_customers-anred
+        ls_customers-name1
+        ls_customers-name2
+        ls_customers-ort01
+        ls_customers-pstlz
+        ls_customers-regio
+        ls_customers-stras
+        ls_customers-telf1
+        ls_customers-stcd1
+        ls_customers-stkzn
+        ls_customers-akont
+        ls_customers-zterm
+        ls_customers-erdat
+        ls_customers-ertim
+        ls_customers-sperr
+        ls_customers-loevm.
+
+*formato campo cliente
+      if not ls_customers-kunnr is initial.
+        call function 'CONVERSION_EXIT_ALPHA_INPUT'
+          exporting
+            input  = ls_customers-kunnr
+          importing
+            output = ls_customers-kunnr.
+      endif.
+
+* call badi (crear/actualizar)
+      cust_maintain_bapi(
+        exporting
+          ts_customer = ls_customers
+          tc_nb_file  = tc_nb_file
+        changing
+          tt_customers_process = lt_customers_process
+      ).
+    endloop.
+
+* generar archivo(s) (procesados y error)
+    if log_file(
+      exporting
+        tt_customers_process = lt_customers_process
+        tc_nb_file           = tc_nb_file
+    ) = abap_false.
+
+* mover archivos a carpeta procesados
+      if move_file(
+          exporting
+            tt_dataset = tt_dataset
+            tc_nb_file = tc_nb_file
+        ) = abap_false.
+
+        dele_file(
+        exporting
+          tc_nb_file = tc_nb_file
+          ).
+      endif.
+    endif.
+
+* salida spool
+    log_spool(
+      exporting
+        tt_customers_process =  lt_customers_process
+        tc_nb_file           = tc_nb_file
+    ).
+
+  endmethod.
+
+  method open_file.
+
+    clear ctt_dataset_file.
+    data l_full_path type file_info-filename.
+*    IF TC_FLAG_REPROC = ABAP_TRUE.
+    concatenate gv_cls_fbas c_cls_slash tc_nb_file into l_full_path.
+*    ELSE. "lee directorio raíz
+*      CONCATENATE V_CLS_FBAS C_CLS_SLASH TC_NB_FILE INTO L_FULL_PATH.
+*    ENDIF.
+
+*    OPEN DATASET ITC_FPRO FOR INPUT IN TEXT MODE ENCODING NON-UNICODE. " original
+
+    data:
+      ls_dataset  type ty_dataset,
+      lc_encoding type sychar01.
+    try.
+        call method cl_abap_file_utilities=>check_utf8
+          exporting
+            file_name = l_full_path
+*           FILE_NAME = V_CLS_T_FPRO
+*           MAX_KB    = 8
+*           ALL_IF_7BIT_ASCII = ABAP_FALSE
+          importing
+*           BOM       =
+            encoding  = lc_encoding.
+      catch cx_sy_file_open .
+      catch cx_sy_file_authority .
+      catch cx_sy_file_io .
+    endtry.
+
+    if lc_encoding = cl_abap_file_utilities=>encoding_utf8.
+    else.
+      open dataset l_full_path for input in text mode encoding non-unicode.
+      if sy-subrc = 0.
+        do.
+          read dataset l_full_path into ls_dataset-row.
+          if sy-subrc = 0 and not ls_dataset-row is initial.
+            append ls_dataset to ctt_dataset_file.
+          else.
+            exit.
+          endif.
+        enddo.
+        close dataset l_full_path.
+        clear l_full_path.
+      endif.
+    endif.
+
+  endmethod.
+
+  method save_customer_processed.
+    data: l_s_customer_n type ty_customer_process,
+          l_s_customer_p type ty_customer_process. "estructura para guardar procesados | p:procesado
+*si existe el deudor se actualiza: fecha/hora/nombre archivo/estatus/mensaje
+    select single * from ztar_logclientes into @data(l_s_customer_m)
+      where bukrs = @ts_customer-bukrs and kunnr = @ts_customer-kunnr and ztipo = @ts_customer-ztipo.
+    if sy-subrc = 0.
+      l_s_customer_m-erdat = sy-datum.
+      l_s_customer_m-ertim = sy-uzeit.
+      l_s_customer_m-nbarc = ts_customer-nbarc.
+      l_s_customer_m-nbarc = ts_customer-nbarc.
+      l_s_customer_m-estat = ts_customer-estat.
+      l_s_customer_m-messg = ts_customer-messg.
+      modify ztar_logclientes from l_s_customer_m.
+      clear l_s_customer_m.
+    else.
+      move ts_customer to l_s_customer_n.
+      l_s_customer_n-erdat = sy-datum.
+      l_s_customer_n-ertim = sy-uzeit.
+      insert ztar_logclientes from l_s_customer_n.
+      clear l_s_customer_n.
+    endif.
+    commit work and wait.
+
+*se guarda registro temporal
+    move ts_customer to l_s_customer_p.
+    l_s_customer_p-erdat = sy-datum.
+    l_s_customer_p-ertim = sy-uzeit.
+    append l_s_customer_p to tt_customers_process.
+*    APPEND l_s_customer_n TO tt_customers_process.
+    clear l_s_customer_p.
+
+  endmethod.
+
+  method  return_to_screen.
+    raise error.
+  endmethod.
+
+
+  method cust_maintain_bapi.
+
+    data: ls_master_data type cmds_ei_main,
+          l_s_es_error   type cvis_message.
+
+    data: lt_customers_bapi type cmds_ei_extern_t,
+          ls_customer_bapi  type cmds_ei_extern,
+          lt_phone          type table of cvis_ei_phone_str,
+          ls_phone          type cvis_ei_phone_str,
+          lt_company_code   type cmds_ei_company_t,
+          ls_company_code   type cmds_ei_company,
+          ls_communication  type cvis_ei_cvi_communication,
+          ls_customer_proc  type ty_customer_process.
+
+    constants: update value 'U',
+               insert value 'I'.
+
+*determinar tipo de acción
+    data(action) = cond char1( when ts_customer-ztipo = c_cls_oper_m then update else insert ).
+    data(flag) = cond char1( when action = update then abap_true else abap_false ).
+
+
+    move-corresponding ts_customer to ls_customer_proc.
+    ls_customer_proc-nbarc = tc_nb_file.
+
+* inicialización de la clase
+    cmd_ei_api=>initialize( ).
+
+*cliente
+    ls_customer_bapi-header-object_instance-kunnr = ts_customer-kunnr.
+*accion a realizar
+    ls_customer_bapi-header-object_task  = action.
+
+    if ts_customer-ztipo = c_cls_oper_m.
+*bloqueo del cliente
+      cmd_ei_api=>lock( iv_kunnr = ts_customer-kunnr ).
+    endif.
+
+*datos de teléfono
+    ls_phone-contact-task = action.
+    ls_phone-contact-data-telephone = ts_customer-telf1.
+    ls_phone-contact-datax-telephone = flag.
+    append ls_phone to lt_phone.
+
+    ls_communication-phone-phone = lt_phone.
+    ls_customer_bapi-central_data-address-communication = ls_communication.
+*datos basicos del cliente
+    ls_customer_bapi-header-object_instance-kunnr = ts_customer-kunnr.
+    ls_customer_bapi-central_data-central-data-stcd1 = ts_customer-stcd1.
+    ls_customer_bapi-central_data-central-datax-stcd1 = flag.
+    ls_customer_bapi-central_data-central-data-stkzn = ts_customer-stkzn.
+    ls_customer_bapi-central_data-central-datax-stkzn = flag.
+*NEW - BEG caso: cuanto sea una modificación "M" no mandar el grupo de cuentas a modificar
+    if not ts_customer-ztipo = c_cls_oper_m.
+      ls_customer_bapi-central_data-central-data-ktokd = ts_customer-ktokd.
+      ls_customer_bapi-central_data-central-datax-ktokd = flag.
+    endif.
+*NEW - END caso: cuanto sea una modificación "M" no mandar el grupo de cuentas a modificar
+    ls_customer_bapi-central_data-address-task = action .
+    ls_customer_bapi-central_data-address-postal-data-title = cond #( when ts_customer-anred = 'SRA' then '0001' when ts_customer-anred = 'SR' then '0002' ).
+    ls_customer_bapi-central_data-address-postal-datax-title = flag.
+    ls_customer_bapi-central_data-address-postal-data-street = ts_customer-stras.
+    ls_customer_bapi-central_data-address-postal-datax-street = flag.
+    ls_customer_bapi-central_data-address-postal-data-name = ts_customer-name1.
+    ls_customer_bapi-central_data-address-postal-datax-name = flag.
+    ls_customer_bapi-central_data-address-postal-data-name_2 = ts_customer-name2.
+    ls_customer_bapi-central_data-address-postal-datax-name_2 = flag.
+    ls_customer_bapi-central_data-address-postal-data-postl_cod1 = ts_customer-pstlz.
+    ls_customer_bapi-central_data-address-postal-datax-postl_cod1 = flag.
+    ls_customer_bapi-central_data-address-postal-data-langu = sy-langu.
+    ls_customer_bapi-central_data-address-postal-datax-langu = flag.
+    ls_customer_bapi-central_data-address-postal-data-region = ts_customer-regio.
+    ls_customer_bapi-central_data-address-postal-datax-region = flag.
+    ls_customer_bapi-central_data-address-postal-data-city = ts_customer-ort01.
+    ls_customer_bapi-central_data-address-postal-datax-city = flag.
+    ls_customer_bapi-central_data-address-postal-data-country = ts_customer-land1.
+    ls_customer_bapi-central_data-address-postal-datax-country = flag.
+
+* datos de la compañia
+    ls_company_code-task           = action.
+    ls_company_code-data_key-bukrs = ts_customer-bukrs.
+    ls_company_code-data-akont     = ts_customer-akont.
+    ls_company_code-datax-akont     = flag.
+    ls_company_code-data-zterm = ts_customer-zterm.
+    ls_company_code-datax-zterm = flag.
+    ls_company_code-data-sperr = ts_customer-sperr.
+    ls_company_code-datax-sperr = flag.
+    ls_company_code-data-loevm = ts_customer-loevm.
+    ls_company_code-datax-loevm = flag.
+    append ls_company_code to lt_company_code.
+
+    ls_customer_bapi-company_data-company = lt_company_code[].
+    append ls_customer_bapi to lt_customers_bapi.
+*    ENDIF.
+
+    ls_master_data-customers = lt_customers_bapi[].
+    data:lr_error type ref to cx_root.
+    try .
+        set update task local.
+        cmd_ei_api=>maintain(
+          exporting
+*            IV_TEST_RUN    = SPACE    " Checkbox Test Run ('X' = Yes)
+            is_master_data =     ls_master_data " Total Customer Data
+          importing
+            es_error       =     l_s_es_error  " Error Indicator and System Messages
+        ).
+
+        data l_v_txt type zmessg.
+        if not l_s_es_error-is_error = abap_true. "?hubo error
+          ls_customer_proc-estat = c_cls_type_p.
+          if ts_customer-ztipo = c_cls_oper_n.
+            ls_customer_proc-messg = text-s01.
+          elseif ts_customer-ztipo = c_cls_oper_m.
+            ls_customer_proc-messg = text-s02.
+          endif.
+          call function 'BAPI_TRANSACTION_COMMIT'
+            exporting
+              wait = 'X'.
+        else.
+          loop at l_s_es_error-messages assigning field-symbol(<f_e>).
+            data lv_mess type zmessg.
+            ls_customer_proc-estat = c_cls_type_e.
+            if <f_e>-number eq '153' or <f_e>-number eq '154'.
+              if lv_mess is initial.
+                lv_mess = <f_e>-number && | | && 'El deudor no existe'.
+              else.
+                lv_mess = lv_mess && | / | && <f_e>-number && | | && <f_e>-message.
+              endif.
+            else.
+              if lv_mess is initial.
+                lv_mess = <f_e>-number && | | && <f_e>-message.
+              else.
+                lv_mess = lv_mess && | / | && <f_e>-number && | | && <f_e>-message.
+              endif.
+              if <f_e>-number eq '151'. "código correspondiente a "El deudor ya existe"
+                ls_customer_proc-estat = c_cls_type_p.
+*                ls_customer_proc-no_log = abap_true.
+              endif.
+            endif.
+          endloop.
+          ls_customer_proc-messg  = lv_mess.
+          call function 'BAPI_TRANSACTION_ROLLBACK'.
+        endif.
+
+      catch cx_root into lr_error.
+        ls_customer_proc-estat = c_cls_type_e.
+        ls_customer_proc-messg = lr_error->get_text( ).
+    endtry.
+
+* guarda cliente procesado
+    save_customer_processed(
+      exporting
+        ts_customer = ls_customer_proc
+      changing
+        tt_customers_process = tt_customers_process
+    ).
+
+  endmethod.
+
+  method validate_date_internal.
+    clear td_date_out.
+    call function 'CONVERT_DATE_TO_INTERNAL'
+      exporting
+        date_external            = tc_date_inp
+      importing
+        date_internal            = td_date_out
+      exceptions
+        date_external_is_invalid = 1
+        others                   = 2.
+    if sy-subrc ne 0.
+      returning_error = abap_true.
+    endif.
+  endmethod.
+
+  method validate_date_external.
+    call function 'CONVERT_DATE_TO_EXTERNAL'
+      exporting
+        date_internal            = tc_date_inp
+      importing
+        date_external            = td_date_out
+      exceptions
+        date_external_is_invalid = 1
+        others                   = 2.
+    if sy-subrc ne 0.
+      returning_error = abap_true.
+    endif.
+  endmethod.
+
+
+  method log_spool.
+
+    constants: c_width_base    type i value '110',
+               c_width_nivel_4 type i value '65'.
+
+    describe table tt_customers_process lines data(l_lines).
+
+    types: begin of ty_collect_cp,
+             kunnr type kunnr,
+             nbarc type znbar,
+             estat type zfi_x7_stat_cte,
+             count type i,
+           end of ty_collect_cp.
+    data: ls_collect_cp type ty_collect_cp,
+          lt_collect_cp type standard table of ty_collect_cp.
+
+    loop at tt_customers_process assigning field-symbol(<f1>).
+      ls_collect_cp-estat = <f1>-estat.
+      ls_collect_cp-nbarc = <f1>-nbarc.
+      add 1 to ls_collect_cp-count.
+      collect ls_collect_cp into lt_collect_cp.
+      clear ls_collect_cp.
+    endloop.
+
+    data: sw    type char1,
+          sw1   type char1,
+          count type i.
+    data: lt_customers_process_error type tt_customers_process,
+          lt_customers_process_proce type tt_customers_process,
+          count2                     type i.
+
+*clientes en error
+    lt_customers_process_error = tt_customers_process.
+    delete lt_customers_process_error where estat = 'P'.
+    describe table lt_customers_process_error lines data(lines_err).
+    if lines_err = 0.
+      append initial line to lt_customers_process_error.
+    endif.
+*clientes procesados
+    lt_customers_process_proce = tt_customers_process.
+    delete lt_customers_process_proce where estat = 'E'.
+    describe table lt_customers_process_proce lines data(lines_pro).
+    if lines_pro = 0.
+      append initial line to lt_customers_process_proce.
+    endif.
+    data(tabix) = sy-tabix.
+
+    loop at lt_customers_process_error assigning field-symbol(<f3>).
+      tabix = sy-tabix.
+      at first.
+        write: /, sy-uline(c_width_base).
+*nivel 1
+        write: / sy-vline, (95) sy-tcode inverse, sy-datum right-justified, sy-vline.
+        write: / sy-vline, (106) sy-uzeit right-justified, sy-vline .
+*nivel 2
+        write: / sy-vline, (106) 'Log de Errores' inverse centered, sy-vline .
+        write: / sy-vline, (106) space, sy-vline .
+*nivel 3
+        data(l_nivel_3) = 'Los siguientes errores se encontraron en el archivo' && | | && tc_nb_file && |:|.
+        write: /(5) sy-vline, (102) l_nivel_3 left-justified, sy-vline .
+        write: /(5) sy-vline, (102) space, sy-vline .
+*nivel 4
+        read table lt_collect_cp with key nbarc = <f3>-nbarc estat = <f3>-estat assigning field-symbol(<f_collect>).
+        if sy-subrc = 0.
+          count2 = <f_collect>-count.
+        endif.
+        write: /(8) sy-vline, (43) 'Clientes Leídos:' left-justified, (55) l_lines left-justified, sy-vline .
+        write: /(8) sy-vline, (43) 'Clientes con Errores' left-justified, (55) count2 left-justified, sy-vline .
+        write: / sy-vline, (106) space, sy-vline.
+*nivel 5
+        write: /(5) sy-vline, (10) 'No.' left-justified, (15) 'No.Cliente' left-justified,(10) 'Cod.Error' left-justified,(64) 'Mensaje' left-justified, sy-vline .
+*
+      endat.
+*nivel 5 (detalle)
+      if not <f3>-kunnr is initial.
+        write: /(5) sy-vline, (10) tabix left-justified, (15) <f3>-kunnr centered,(10) <f3>-messg(3) left-justified,(64)
+        <f3>-messg+4   left-justified, sy-vline .
+      endif.
+
+      at last.
+*nivel 6
+        write: /(5) sy-vline, (102) space, sy-vline .
+        write: / sy-vline, (106) 'Fin del Reporte' inverse centered, sy-vline .
+        write:/ sy-uline(c_width_base).
+      endat.
+
+    endloop.
+
+*clientes procesado(s)
+    loop at lt_customers_process_proce assigning field-symbol(<f_proce>).
+      tabix = sy-tabix.
+      at first.
+        do 2 times.
+          write /.
+        enddo.
+        write: /, sy-uline(c_width_base).
+*nivel 1
+        write: / sy-vline, (95) sy-tcode inverse, sy-datum right-justified, sy-vline.
+        write: / sy-vline, (106) sy-uzeit right-justified, sy-vline .
+*nivel 2
+        write: / sy-vline, (106) 'Log de Clientes Procesados X7 a SAP' inverse centered, sy-vline .
+        write: / sy-vline, (106) space, sy-vline .
+*nivel 3
+        clear l_nivel_3.
+        l_nivel_3 = 'Los siguientes Clientes se procesaron correctamente en el archivo recibido' && | | && tc_nb_file && |:|.
+        write: /(5) sy-vline, (102) l_nivel_3 left-justified, sy-vline .
+        write: /(5) sy-vline, (102) space, sy-vline .
+*nivel 4
+        clear count2.
+        read table lt_collect_cp with key nbarc = <f_proce>-nbarc estat = <f_proce>-estat assigning field-symbol(<f_collect2>).
+        if sy-subrc = 0.
+          count2 = <f_collect2>-count.
+        endif.
+        write: /(8) sy-vline, (43) 'Clientes Leídos:' left-justified, (55) l_lines left-justified, sy-vline .
+        write: /(8) sy-vline, (43) 'Clientes Correctos' left-justified, (55) count2 left-justified, sy-vline .
+        write: / sy-vline, (106) space, sy-vline.
+*nivel 5
+        write: /(5) sy-vline, (10) 'No.' left-justified, (15) 'No.Cliente' left-justified,(75) 'Mensaje' left-justified, sy-vline .
+*
+      endat.
+*nivel 5 (detalle)
+      if not <f_proce>-kunnr is initial.
+        write: /(5) sy-vline, (10) tabix left-justified, (15) <f_proce>-kunnr centered,(75) <f_proce>-messg left-justified,sy-vline .
+      endif.
+      at last.
+*nivel 6
+        write: /(5) sy-vline, (102) space, sy-vline .
+        write: / sy-vline, (106) 'Fin del Reporte' inverse centered, sy-vline .
+        write:/ sy-uline(c_width_base).
+      endat.
+
+    endloop.
+
+  endmethod.
+
+  method log_file.
+    data: file             type file,
+          errm             type string,
+          line(1024),
+          nbfile           type znbar,
+          l_t_cust_process type tt_customers_process.
+
+    l_t_cust_process = tt_customers_process.
+
+*    DELETE l_t_cust_process WHERE no_log = abap_true.
+
+    constants pai value '|'.
+    data(strlen_name) = strlen( tc_nb_file ).
+    subtract 4 from strlen_name.
+
+    read table l_t_cust_process with key estat = 'E' transporting no fields.
+    if sy-subrc = 0.
+* errores
+      file = gv_cls_ferr && tc_nb_file(strlen_name) && |_err.log|.
+      open dataset file in text mode for output
+        encoding non-unicode ignoring conversion errors message errm.
+      if not errm is initial.
+        write errm.
+        returning_error = abap_true.
+        return.
+      endif.
+
+      loop at l_t_cust_process into data(ls) where estat = 'E'.
+        data(msg_error) = ls-messg+4.
+        data(number_error) = ls-messg(3).
+        line = ls-kunnr && pai && number_error && pai && msg_error.
+        transfer line to file.
+        clear line.
+      endloop.
+
+      close dataset file.
+    endif.
+
+    read table l_t_cust_process with key estat = 'P' transporting no fields.
+    if sy-subrc = 0.
+* procesados
+      file = gv_cls_fpro && tc_nb_file(strlen_name) && |_PROC.log|.
+*      file = gv_cls_fbas  && |/| &&  'Procesado' && '/' && tc_nb_file(strlen_name) && |_PROC.log|.
+      open dataset file in text mode for output
+        encoding non-unicode ignoring conversion errors message errm.
+      if not errm is initial.
+        write errm.
+        returning_error = abap_true.
+        return.
+      endif.
+
+      loop at l_t_cust_process assigning field-symbol(<f>) where estat = 'P'.
+        line = <f>-kunnr && pai && <f>-messg.
+        transfer line to file.
+        clear line.
+      endloop.
+
+      close dataset file.
+
+    endif.
+
+
+  endmethod.
+
+  method move_file.
+
+    data: file       type file,
+          errm       type string,
+          line(1024),
+          nbfile     type znbar.
+
+    file = gv_cls_fbas && tc_nb_file.
+*    file = gv_cls_fbas && |/| &&  'procesado' && |/| && tc_nb_file.
+    open dataset file in text mode for output
+      encoding non-unicode ignoring conversion errors message errm.
+    if not errm is initial.
+      write errm.
+      returning_error = abap_true.
+      return.
+    endif.
+
+
+    loop at tt_dataset assigning field-symbol(<wa_tab>).
+      line = <wa_tab>-row.
+      transfer line to file.
+      clear line.
+    endloop.
+
+    close dataset file.
+
+  endmethod.
+  method dele_file.
+    data file       type file.
+    data(strlen_name) = strlen( tc_nb_file ).
+    subtract 3 from strlen_name.
+
+    do 1 times.
+      case sy-index.
+        when 1."archivo con extensión .txt
+          file = gv_cls_fbas && |/| && tc_nb_file.
+*        WHEN 2."archivo con extensión .fin
+*          FILE = gv_cls_fbas && |/| && TC_NB_FILE(STRLEN_NAME) && |fin| .
+      endcase.
+      delete dataset file.
+      commit work and wait.
+    enddo.
+
+  endmethod.
+endclass.
