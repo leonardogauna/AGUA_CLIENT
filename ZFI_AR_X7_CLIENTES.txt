@@ -1,0 +1,75 @@
+* -----------  -------------  ----------------------  ---------------- *
+*                       INFORMACION GENERAL                            *
+*  Nombre del programa  : Report  ZFI_AR_X7_CLIENTES                   *
+*  Descripción          : Programa                                     *
+*  Desarrollador SAP    : Leonardo Gauna USER:INVLGAUNA                *
+*  Fecha de elaboración : 08.04.2018                                   *
+*  Tipo                 : Report                                       *
+*  Origen               :                                              *
+*  Propósito            : Carga/modificación de Clientes               *
+*  Módulo               : Finanzas                                     *
+*  Restricciones        : N/A                                          *
+* -----------  -------------  ----------------------  ---------------- *
+
+REPORT zfi_ar_x7_clientes.
+
+INCLUDE zfi_ar_x7_clientes_rtn.
+
+*PARAMETERS P_RUTA TYPE LOCALFILE DEFAULT 'f:/usr/sap/X7/clientes'.
+SELECTION-SCREEN BEGIN OF BLOCK a1 WITH FRAME TITLE text-003.
+
+PARAMETERS:
+  p_fbas TYPE zfi_x7_dirname_01,
+  p_fpro TYPE zfi_x7_dirname_01,
+  p_ferr TYPE zfi_x7_dirname_01.
+SELECTION-SCREEN END OF BLOCK a1.
+*PARAMETERS P_RUTA TYPE LOCALFILE DEFAULT 'f:/usr/sap/X7/clientes'.
+
+INITIALIZATION.
+  DATA: lv_fbas	TYPE rvari_val_255,
+        lv_fpro	TYPE rvari_val_255,
+        lv_ferr	TYPE rvari_val_255.
+  SELECT * FROM tvarvc INTO TABLE @DATA(lt_rutas_archvos) WHERE name = 'ZFI_AR_X7_CLIENTES'.
+  LOOP AT lt_rutas_archvos ASSIGNING FIELD-SYMBOL(<f>).
+    CASE <f>-numb.
+      WHEN 0. "raíz
+        lv_fbas = <f>-low.
+      WHEN 1. "procesados
+        lv_fpro = <f>-low.
+      WHEN 2. "error
+        lv_ferr = <f>-low.
+    ENDCASE.
+  ENDLOOP.
+
+  LOOP AT SCREEN.
+    IF screen-name = 'P_FPRO'.
+      p_fpro = lv_fpro.
+      screen-input = 0.
+      MODIFY SCREEN.
+    ELSEIF screen-name = 'P_FBAS'.
+      p_fbas = lv_fbas.
+      screen-input = 0.
+      MODIFY SCREEN.
+    ELSEIF screen-name = 'P_FERR'.
+      p_ferr = lv_ferr.
+      screen-input = 0.
+      MODIFY SCREEN.
+    ENDIF.
+  ENDLOOP.
+
+START-OF-SELECTION.
+
+  DATA(go) = NEW lcl_share_functions(  i_fbas = p_fbas
+                                       i_fpro = p_fpro
+                                       i_ferr = p_ferr ).
+
+  go->process( ).
+
+
+*TOP-OF-PAGE.
+*  WRITE: /, SY-ULINE(24).
+*  WRITE:
+*      / SY-VLINE, (7) TEXT-C01 COLOR COL_HEADING, (12) SY-UNAME COLOR COL_HEADING, SY-VLINE,
+*      / SY-VLINE, (7) TEXT-C02 COLOR COL_HEADING, (12) SY-DATUM COLOR COL_HEADING, SY-VLINE,
+*      / SY-VLINE, (7) TEXT-C03 COLOR COL_HEADING, (12) SY-UZEIT COLOR COL_HEADING, SY-VLINE.
+*  WRITE:/ SY-ULINE(24).
