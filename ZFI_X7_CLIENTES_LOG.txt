@@ -1,0 +1,44 @@
+* -----------  -------------  ----------------------  ---------------- *
+*                       INFORMACION GENERAL                            *
+*  Nombre del programa  : Report  ZFI_X7_CLIENTES_LOG               *
+*  Descripción          : Programa                                     *
+*  Desarrollador SAP    : Leonardo Gauna USER:INVLGAUNA                *
+*  Fecha de elaboración : 08.04.2018                                   *
+*  Tipo                 : Report                                       *
+*  Origen               :                                              *
+*  Propósito            : Log de resultado de Carga/mod. de Clientes   *
+*  Módulo               : Finanzas                                     *
+*  Restricciones        : N/A                                          *
+* -----------  -------------  ----------------------  ---------------- *
+
+report zfi_x7_clientes_log.
+tables ztar_logclientes.
+data: gv_ok_code type sy-ucomm.
+include zfi_x7_clientes_log_rtn.
+data: ty_ztipo type zztipo,
+      ty_zstat type zfi_x7_stat_cte.
+selection-screen begin of block a1 with frame title text-001.
+*PARAMETERS: P_TYPE TYPE ZISETYPE.
+select-options:
+  s_kunnr for ztar_logclientes-kunnr,
+  s_bukrs for ztar_logclientes-bukrs,
+  s_ztipo	for ty_ztipo,
+  s_nbarc	for ztar_logclientes-nbarc,
+  s_erdat	for ztar_logclientes-erdat,
+  s_ertim	for ztar_logclientes-ertim,
+  s_estat	for ty_zstat.
+selection-screen end of block a1.
+
+
+start-of-selection.
+  data(go_functions) =
+  new lcl_share_functions(
+      i_kunnr =   s_kunnr[]
+      i_bukrs =   s_bukrs[]
+      i_ztipo =   s_ztipo[]
+      i_nbarc =   s_nbarc[]
+      i_erdat =   s_erdat[]
+      i_ertim =   s_ertim[]
+      i_estat =   s_estat[]
+).
+  go_functions->process( ).
